@@ -18,7 +18,6 @@ from pathlib import Path
 import mlflow
 import mlflow.sklearn
 import mlflow.xgboost
-import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression

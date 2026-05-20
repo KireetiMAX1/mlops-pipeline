@@ -16,8 +16,6 @@ Run locally:
 from __future__ import annotations
 import os
 import time
-import json
-from pathlib import Path
 from typing import Optional
 
 import mlflow
@@ -88,9 +86,12 @@ class PredictionResponse(BaseModel):
 
 
 def get_risk_tier(prob: float) -> str:
-    if prob >= 0.70:   return "HIGH"
-    elif prob >= 0.40: return "MEDIUM"
-    else:              return "LOW"
+    if prob >= 0.70:
+        return "HIGH"
+    elif prob >= 0.40:
+        return "MEDIUM"
+    else:
+        return "LOW"
 
 
 def load_model():
