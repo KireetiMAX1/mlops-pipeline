@@ -16,7 +16,7 @@ Run locally:
 from __future__ import annotations
 import os
 import time
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import mlflow
 import mlflow.pyfunc
@@ -80,7 +80,7 @@ class PredictionResponse(BaseModel):
     churn_probability: float
     churn_prediction: bool
     risk_tier: str
-    explanation: Optional[dict] = None  # type: ignore[type-arg]
+    explanation: Optional[Dict[str, Any]] = None
     model_version: str
     latency_ms: float
 
@@ -171,7 +171,7 @@ def predict(request: PredictionRequest, background_tasks: BackgroundTasks):
                 for col, val in zip(df.columns, shap_vals[0])
             }
         except Exception:
-            explanation = {"note": "SHAP unavailable for this model type"}
+            explanation = {"shap_unavailable": 1.0}
 
     record = {
         "timestamp":   time.time(),

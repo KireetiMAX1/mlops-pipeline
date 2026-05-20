@@ -15,7 +15,7 @@ from pathlib import Path
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from dataclasses import dataclass, field
-from typing import List, Tuple
+from typing import Any, List, Tuple
 
 
 REQUIRED_COLUMNS: List[str] = [
@@ -118,7 +118,7 @@ def preprocess(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
 
 def load_and_preprocess(
     data_path: str, test_size: float = 0.2, seed: int = 42
-) -> Tuple[object, object, object, object, List[str]]:
+) -> Tuple[Any, Any, Any, Any, List[str]]:
     path = Path(data_path)
     if not path.exists():
         print(f"  Data not found at {path} — generating synthetic dataset...")
