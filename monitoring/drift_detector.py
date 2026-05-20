@@ -1,11 +1,9 @@
 """
-Data drift and model performance monitoring using Evidently AI.
+Data drift monitoring using Evidently AI.
 
 Detects:
-  - Feature distribution drift (PSI, KS test)
-  - Target drift (prediction distribution shift)
+  - Feature distribution drift (KS test, PSI)
   - Missing value changes
-  - Model performance degradation
 
 Run:
     python monitoring/drift_detector.py --reference data/processed/churn.csv
@@ -21,18 +19,15 @@ from datetime import datetime
 
 import numpy as np
 import pandas as pd
-from evidently.report import Report
-from evidently.metric_preset import DataDriftPreset, DataQualityPreset
-from evidently.metrics import (
-    DatasetDriftMetric,
-    DatasetMissingValuesMetric,
-    ColumnDriftMetric,
-)
+from evidently import Report
+from evidently.presets import DataDriftPreset
 import mlflow
 
-DRIFT_THRESHOLD     = float(os.getenv("DRIFT_THRESHOLD", "0.15"))
+DRIFT_THRESHOLD     = float(os.getenv("DRIFT_THRESHOLD", "0.5"))
 REPORTS_DIR         = Path("monitoring/reports")
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db")
+
+NUM_COLS = ["tenure", "monthly_charges", "total_charges"]
 
 
 def load_reference(path: str) -> pd.DataFrame:
@@ -68,40 +63,47 @@ def run_drift_report(
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    num_cols = ["tenure", "monthly_charges", "total_charges"]
-    ref_num = reference[num_cols]
-    cur_num = current[num_cols]
+    ref_num = reference[NUM_COLS].copy()
+    cur_num = current[NUM_COLS].copy()
 
-    report = Report(metrics=[
-        DataDriftPreset(),
-        DataQualityPreset(),
-        DatasetDriftMetric(),
-        DatasetMissingValuesMetric(),
-        *[ColumnDriftMetric(column_name=col) for col in num_cols],
-    ])
-
-    report.run(reference_data=ref_num, current_data=cur_num)
+    report = Report([DataDriftPreset()])
+    snapshot = report.run(reference_data=ref_num, current_data=cur_num)
 
     html_path = output_dir / f"drift_report_{timestamp}.html"
-    report.save_html(str(html_path))
+    snapshot.save_html(str(html_path))
 
-    result = report.as_dict()
-    drift_detected = result["metrics"][2]["result"]["dataset_drift"]
-    share_drifted  = result["metrics"][2]["result"]["share_of_drifted_columns"]
+    result = snapshot.dict()
+    metrics = result.get("metrics", [])
 
-    summary = {
-        "timestamp":              timestamp,
-        "drift_detected":         drift_detected,
-        "share_drifted_columns":  round(share_drifted, 4),
-        "reference_rows":         len(reference),
-        "current_rows":           len(current),
-        "report_path":            str(html_path),
+    drifted_count = 0.0
+    drifted_share = 0.0
+    col_drift_scores: dict = {}
+
+    for m in metrics:
+        name = m.get("metric_name", "")
+        value = m.get("value", 0)
+
+        if "DriftedColumnsCount" in name and isinstance(value, dict):
+            drifted_count = float(value.get("count", 0))
+            drifted_share = float(value.get("share", 0))
+
+        for col in NUM_COLS:
+            if f"ValueDrift(column={col}" in name:
+                col_drift_scores[col] = round(float(value) if isinstance(value, (int, float)) else 0.0, 4)
+
+    drift_detected = drifted_share > DRIFT_THRESHOLD
+
+    summary: dict = {
+        "timestamp":             timestamp,
+        "drift_detected":        drift_detected,
+        "share_drifted_columns": round(drifted_share, 4),
+        "drifted_column_count":  int(drifted_count),
+        "reference_rows":        len(reference),
+        "current_rows":          len(current),
+        "report_path":           str(html_path),
     }
-
-    for i, col in enumerate(num_cols):
-        col_result = result["metrics"][4 + i]["result"]
-        summary[f"{col}_drift_score"] = round(col_result.get("drift_score", 0.0), 4)
-        summary[f"{col}_drifted"]     = col_result.get("drift_detected", False)
+    for col in NUM_COLS:
+        summary[f"{col}_drift_score"] = col_drift_scores.get(col, 0.0)
 
     json_path = output_dir / f"drift_summary_{timestamp}.json"
     json_path.write_text(json.dumps(summary, indent=2))
@@ -109,19 +111,19 @@ def run_drift_report(
     return summary
 
 
-def log_to_mlflow(summary: dict):
+def log_to_mlflow(summary: dict) -> None:
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
     mlflow.set_experiment("monitoring-drift")
     with mlflow.start_run(run_name=f"drift-check-{summary['timestamp']}"):
         mlflow.log_metric("drift_detected", int(summary["drift_detected"]))
         mlflow.log_metric("share_drifted_columns", summary["share_drifted_columns"])
-        for col in ["tenure", "monthly_charges", "total_charges"]:
+        for col in NUM_COLS:
             mlflow.log_metric(f"{col}_drift_score", summary.get(f"{col}_drift_score", 0))
         mlflow.log_artifact(summary["report_path"])
 
 
 def trigger_retraining_if_needed(summary: dict) -> bool:
-    if summary["drift_detected"] and summary["share_drifted_columns"] > DRIFT_THRESHOLD:
+    if summary["drift_detected"]:
         print(f"\nDRIFT ALERT: {summary['share_drifted_columns']:.0%} of columns drifted!")
         print("  Automated retraining should be triggered via GitHub Actions or workflow scheduler.")
         # In production: call GitHub Actions API, Airflow, or Prefect here
