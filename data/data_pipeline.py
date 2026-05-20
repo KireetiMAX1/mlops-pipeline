@@ -8,36 +8,35 @@ Run:
 """
 
 from __future__ import annotations
+import json
 import numpy as np
 import pandas as pd
 from pathlib import Path
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from dataclasses import dataclass, field
-from typing import Tuple
-import json
+from typing import List, Tuple
 
 
-SCHEMA = {
-    "required_columns": [
-        "tenure", "monthly_charges", "total_charges",
-        "contract", "payment_method", "internet_service",
-        "tech_support", "online_security", "churn"
-    ],
-    "numeric_columns": ["tenure", "monthly_charges", "total_charges"],
-    "categorical_columns": ["contract", "payment_method", "internet_service",
-                            "tech_support", "online_security"],
-    "target": "churn",
-    "min_rows": 100,
-}
+REQUIRED_COLUMNS: List[str] = [
+    "tenure", "monthly_charges", "total_charges",
+    "contract", "payment_method", "internet_service",
+    "tech_support", "online_security", "churn",
+]
+NUMERIC_COLUMNS: List[str]     = ["tenure", "monthly_charges", "total_charges"]
+CATEGORICAL_COLUMNS: List[str] = [
+    "contract", "payment_method", "internet_service", "tech_support", "online_security"
+]
+TARGET: str  = "churn"
+MIN_ROWS: int = 100
 
 
 @dataclass
 class ValidationReport:
     passed: bool = True
-    issues: list[str] = field(default_factory=list)
+    issues: List[str] = field(default_factory=list)
 
-    def fail(self, msg: str):
+    def fail(self, msg: str) -> None:
         self.passed = False
         self.issues.append(msg)
 
@@ -48,21 +47,21 @@ class ValidationReport:
 def validate_schema(df: pd.DataFrame) -> ValidationReport:
     report = ValidationReport()
 
-    missing = [c for c in SCHEMA["required_columns"] if c not in df.columns]
+    missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
     if missing:
         report.fail(f"Missing columns: {missing}")
 
-    if len(df) < SCHEMA["min_rows"]:
-        report.fail(f"Too few rows: {len(df)} < {SCHEMA['min_rows']}")
+    if len(df) < MIN_ROWS:
+        report.fail(f"Too few rows: {len(df)} < {MIN_ROWS}")
 
-    for col in SCHEMA["numeric_columns"]:
+    for col in NUMERIC_COLUMNS:
         if col in df.columns:
             null_pct = df[col].isnull().mean()
             if null_pct > 0.05:
                 report.fail(f"Column '{col}' has {null_pct:.1%} nulls (>5%)")
 
-    if SCHEMA["target"] in df.columns:
-        target_rate = df[SCHEMA["target"]].mean()
+    if TARGET in df.columns:
+        target_rate = df[TARGET].mean()
         if target_rate < 0.05 or target_rate > 0.95:
             report.fail(f"Extreme class imbalance: positive rate = {target_rate:.2%}")
 
@@ -102,22 +101,24 @@ def generate_sample_data(n: int = 5000, seed: int = 42) -> pd.DataFrame:
     })
 
 
-def preprocess(df: pd.DataFrame) -> Tuple[pd.DataFrame, list[str]]:
+def preprocess(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
     df = df.copy()
 
     le = LabelEncoder()
-    for col in SCHEMA["categorical_columns"]:
+    for col in CATEGORICAL_COLUMNS:
         if col in df.columns:
             df[col] = le.fit_transform(df[col].astype(str))
 
     df["charges_per_tenure"] = df["monthly_charges"] / (df["tenure"] + 1)
     df["high_value_customer"] = (df["monthly_charges"] > 70).astype(int)
 
-    feature_cols = [c for c in df.columns if c != SCHEMA["target"]]
+    feature_cols = [c for c in df.columns if c != TARGET]
     return df[feature_cols], feature_cols
 
 
-def load_and_preprocess(data_path: str, test_size: float = 0.2, seed: int = 42):
+def load_and_preprocess(
+    data_path: str, test_size: float = 0.2, seed: int = 42
+) -> Tuple[object, object, object, object, List[str]]:
     path = Path(data_path)
     if not path.exists():
         print(f"  Data not found at {path} — generating synthetic dataset...")
@@ -137,7 +138,7 @@ def load_and_preprocess(data_path: str, test_size: float = 0.2, seed: int = 42):
     print("  Data validation passed")
 
     X, feature_names = preprocess(df)
-    y = df[SCHEMA["target"]]
+    y = df[TARGET]
 
     X_train, X_val, y_train, y_val = train_test_split(
         X, y, test_size=test_size, stratify=y, random_state=seed

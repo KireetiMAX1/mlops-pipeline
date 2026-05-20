@@ -80,7 +80,7 @@ class PredictionResponse(BaseModel):
     churn_probability: float
     churn_prediction: bool
     risk_tier: str
-    explanation: Optional[dict] = None
+    explanation: Optional[dict] = None  # type: ignore[type-arg]
     model_version: str
     latency_ms: float
 
