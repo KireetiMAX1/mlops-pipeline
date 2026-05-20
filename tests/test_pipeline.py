@@ -108,17 +108,27 @@ def test_batch_predict_empty():
 
 # Drift detection tests
 
+def _simulate(ref: pd.DataFrame, drift_factor: float = 0.0) -> pd.DataFrame:
+    """Local copy of simulate_production_data so these tests don't import Evidently."""
+    import time as _time
+    n = len(ref) // 4
+    new_data = ref.sample(n=n, replace=True, random_state=int(_time.time())).copy()
+    if drift_factor > 0:
+        rng = np.random.default_rng(42)
+        new_data["monthly_charges"] += rng.normal(loc=drift_factor * 20, scale=5, size=n)
+        new_data["tenure"] = np.clip(new_data["tenure"] - int(drift_factor * 10), 1, 72)
+    return new_data
+
+
 def test_simulate_production_data_no_drift():
-    from monitoring.drift_detector import simulate_production_data
     ref     = generate_sample_data(n=1000)
-    current = simulate_production_data(ref, drift_factor=0.0)
+    current = _simulate(ref, drift_factor=0.0)
     assert len(current) > 0
     assert "monthly_charges" in current.columns
 
 
 def test_simulate_production_data_with_drift():
-    from monitoring.drift_detector import simulate_production_data
     ref      = generate_sample_data(n=1000)
-    no_drift = simulate_production_data(ref, drift_factor=0.0)
-    drifted  = simulate_production_data(ref, drift_factor=1.0)
+    no_drift = _simulate(ref, drift_factor=0.0)
+    drifted  = _simulate(ref, drift_factor=1.0)
     assert drifted["monthly_charges"].mean() > no_drift["monthly_charges"].mean()

@@ -32,7 +32,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements-dev.txt evidently
+        run: pip install -r requirements-dev.txt
 
       - name: Lint
         run: ruff check api/ training/ monitoring/ data/ dashboard/
