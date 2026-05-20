@@ -119,7 +119,10 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - run: pip install evidently pandas numpy mlflow
+      - run: pip install evidently pandas numpy mlflow scikit-learn
+
+      - name: Generate data
+        run: python data/data_pipeline.py
 
       - name: Run drift detection
         run: python monitoring/drift_detector.py --reference data/processed/churn.csv
