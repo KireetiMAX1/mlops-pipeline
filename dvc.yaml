@@ -1,0 +1,34 @@
+stages:
+  prepare:
+    cmd: python data/data_pipeline.py
+    deps:
+      - data/data_pipeline.py
+    outs:
+      - data/raw/churn.csv
+      - data/processed/churn.csv
+      - data/processed/validation_report.json
+
+  train:
+    cmd: python training/train.py --experiment dvc-run --model xgboost --data data/processed/churn.csv
+    deps:
+      - training/train.py
+      - training/config.yaml
+      - data/processed/churn.csv
+    params:
+      - training/config.yaml:
+          - model_name
+          - n_estimators
+          - max_depth
+    metrics:
+      - training/last_run_metrics.json:
+          cache: false
+    outs:
+      - outputs/model/
+
+  evaluate:
+    cmd: python monitoring/drift_detector.py --reference data/processed/churn.csv
+    deps:
+      - monitoring/drift_detector.py
+      - data/processed/churn.csv
+    outs:
+      - monitoring/reports/

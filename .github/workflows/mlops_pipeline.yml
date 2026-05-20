@@ -1,0 +1,156 @@
+name: MLOps CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 2 * * 1"   # Weekly retraining check every Monday at 2am UTC
+  workflow_dispatch:
+    inputs:
+      force_retrain:
+        description: "Force model retraining"
+        required: false
+        default: "false"
+
+env:
+  MLFLOW_TRACKING_URI: sqlite:///mlflow.db
+  REGISTERED_MODEL_NAME: churn-predictor
+
+jobs:
+  test:
+    name: Lint and Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: ruff check api/ training/ monitoring/ data/ dashboard/
+
+      - name: Type check
+        run: mypy api/serve.py training/train.py --ignore-missing-imports
+
+      - name: Run tests
+        run: pytest tests/ -v --cov=api --cov=training --cov-report=xml
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          file: coverage.xml
+
+  validate-data:
+    name: Data Validation
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install pandas numpy scikit-learn
+
+      - name: Validate data schema
+        run: python data/data_pipeline.py
+
+      - name: Upload validation report
+        uses: actions/upload-artifact@v4
+        with:
+          name: data-validation-report
+          path: data/processed/validation_report.json
+
+  train:
+    name: Train and Evaluate
+    runs-on: ubuntu-latest
+    needs: validate-data
+    if: |
+      github.event_name == 'schedule' ||
+      github.event.inputs.force_retrain == 'true' ||
+      contains(github.event.head_commit.message, '[retrain]')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: Train model
+        run: python training/train.py --experiment ci-run --model xgboost
+
+      - name: Performance gate (ROC-AUC >= 0.75)
+        run: |
+          python - <<'EOF'
+          import json, sys
+          metrics = json.loads(open("training/last_run_metrics.json").read())
+          roc_auc = metrics.get("roc_auc", 0)
+          print(f"ROC-AUC: {roc_auc}")
+          if roc_auc < 0.75:
+              print(f"FAIL: ROC-AUC {roc_auc} is below the threshold of 0.75")
+              sys.exit(1)
+          print(f"PASS: ROC-AUC {roc_auc} meets threshold")
+          EOF
+
+      - name: Upload MLflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlflow-run
+          path: |
+            mlflow.db
+            training/last_run_metrics.json
+
+  drift-check:
+    name: Drift Detection
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install evidently pandas numpy mlflow
+
+      - name: Run drift detection
+        run: python monitoring/drift_detector.py --reference data/processed/churn.csv
+
+      - name: Upload drift report
+        uses: actions/upload-artifact@v4
+        with:
+          name: drift-report
+          path: monitoring/reports/
+
+  deploy:
+    name: Deploy API
+    runs-on: ubuntu-latest
+    needs: [test, validate-data]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t mlops-api:${{ github.sha }} -f infra/Dockerfile .
+
+      - name: Smoke test Docker image
+        run: |
+          docker run -d -p 8000:8000 --name test-api mlops-api:${{ github.sha }}
+          sleep 5
+          curl -f http://localhost:8000/health || exit 1
+          docker stop test-api
+
+      # To deploy to AWS ECR, uncomment and configure the steps below:
+      # - name: Push to ECR
+      #   run: |
+      #     aws ecr get-login-password | docker login --username AWS --password-stdin $ECR_REGISTRY
+      #     docker tag mlops-api:${{ github.sha }} $ECR_REGISTRY/mlops-api:latest
+      #     docker push $ECR_REGISTRY/mlops-api:latest

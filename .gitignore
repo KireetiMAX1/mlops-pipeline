@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment variables
+.env
+
+# MLflow
+mlflow.db
+mlruns/
+
+# DVC
+/data/raw/
+/data/processed/
+*.dvc
+!.dvcignore
+
+# Model artifacts
+outputs/
+training/last_run_metrics.json
+
+# Monitoring reports (generated at runtime)
+monitoring/reports/
+
+# Streamlit
+.streamlit/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
